@@ -105,8 +105,7 @@ end
 function MOI.supports(
     optimizer::Optimizer,
     ::Union{MOI.ObjectiveSense,
-            MOI.ObjectiveFunction{<:Union{MOI.SingleVariable,
-                                          MOI.ScalarAffineFunction{Cdouble}}}})
+            MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Cdouble}}})
     return true
 end
 
@@ -135,7 +134,7 @@ function MOIU.allocate(optimizer::Optimizer, ::MOI.ObjectiveSense, sense::MOI.Op
     # To be sure that it is done before load(optimizer, ::ObjectiveFunction, ...), we do it in allocate
     optimizer.objsign = sense == MOI.MIN_SENSE ? -1 : 1
 end
-function MOIU.allocate(::Optimizer, ::MOI.ObjectiveFunction, ::Union{MOI.SingleVariable, MOI.ScalarAffineFunction}) end
+function MOIU.allocate(::Optimizer, ::MOI.ObjectiveFunction, ::MOI.ScalarAffineFunction) end
 
 function MOIU.load(::Optimizer, ::MOI.ObjectiveSense, ::MOI.OptimizationSense) end
 # Loads objective coefficient α * vi
@@ -156,9 +155,6 @@ function MOIU.load(optimizer::Optimizer, ::MOI.ObjectiveFunction, f::MOI.ScalarA
             load_objective_term!(optimizer, t.coefficient, t.variable_index)
         end
     end
-end
-function MOIU.load(optimizer::Optimizer, ::MOI.ObjectiveFunction, f::MOI.SingleVariable)
-    load_objective_term!(optimizer, one(Cdouble), f.variable)
 end
 
 function new_block(optimizer::Optimizer, set::MOI.Nonnegatives)
@@ -281,7 +277,10 @@ function MOI.get(m::Optimizer, ::MOI.TerminationStatus)
     end
 end
 
-function MOI.get(m::Optimizer, ::MOI.PrimalStatus)
+function MOI.get(m::Optimizer, attr::MOI.PrimalStatus)
+    if attr.N > MOI.get(m, MOI.ResultCount())
+        return MOI.NO_SOLUTION
+    end
     status = m.status
     if status == 0
         return MOI.FEASIBLE_POINT
@@ -298,7 +297,10 @@ function MOI.get(m::Optimizer, ::MOI.PrimalStatus)
     end
 end
 
-function MOI.get(m::Optimizer, ::MOI.DualStatus)
+function MOI.get(m::Optimizer, attr::MOI.DualStatus)
+    if attr.N > MOI.get(m, MOI.ResultCount())
+        return MOI.NO_SOLUTION
+    end
     status = m.status
     if status == 0
         return MOI.FEASIBLE_POINT
@@ -316,10 +318,12 @@ function MOI.get(m::Optimizer, ::MOI.DualStatus)
 end
 
 MOI.get(m::Optimizer, ::MOI.ResultCount) = 1
-function MOI.get(m::Optimizer, ::MOI.ObjectiveValue)
+function MOI.get(m::Optimizer, attr::MOI.ObjectiveValue)
+    MOI.check_result_index_bounds(m, attr)
     return m.objsign * m.pobj + m.objconstant
 end
-function MOI.get(m::Optimizer, ::MOI.DualObjectiveValue)
+function MOI.get(m::Optimizer, attr::MOI.DualObjectiveValue)
+    MOI.check_result_index_bounds(m, attr)
     return m.objsign * m.dobj + m.objconstant
 end
 struct PrimalSolutionMatrix <: MOI.AbstractModelAttribute end
@@ -364,23 +368,28 @@ function vectorize_block(M::AbstractMatrix{Cdouble}, blk::Integer, s::Type{MOI.P
     return v
 end
 
-function MOI.get(optimizer::Optimizer, ::MOI.VariablePrimal, vi::MOI.VariableIndex)
+function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
+    MOI.check_result_index_bounds(optimizer, attr)
     blk, i, j = varmap(optimizer, vi)
     return block(MOI.get(optimizer, PrimalSolutionMatrix()), blk)[i, j]
 end
 
-function MOI.get(optimizer::Optimizer, ::MOI.ConstraintPrimal,
+function MOI.get(optimizer::Optimizer, attr::MOI.ConstraintPrimal,
                  ci::MOI.ConstraintIndex{MOI.VectorOfVariables, S}) where S<:SupportedSets
+    MOI.check_result_index_bounds(optimizer, attr)
     return vectorize_block(MOI.get(optimizer, PrimalSolutionMatrix()), block(optimizer, ci), S)
 end
-function MOI.get(m::Optimizer, ::MOI.ConstraintPrimal, ci::AFFEQ)
-    return m.b[ci.value]
+function MOI.get(optimizer::Optimizer, attr::MOI.ConstraintPrimal, ci::AFFEQ)
+    MOI.check_result_index_bounds(optimizer, attr)
+    return optimizer.b[ci.value]
 end
 
-function MOI.get(optimizer::Optimizer, ::MOI.ConstraintDual,
+function MOI.get(optimizer::Optimizer, attr::MOI.ConstraintDual,
                  ci::MOI.ConstraintIndex{MOI.VectorOfVariables, S}) where S<:SupportedSets
+    MOI.check_result_index_bounds(optimizer, attr)
     return vectorize_block(MOI.get(optimizer, DualSlackMatrix()), block(optimizer, ci), S)
 end
-function MOI.get(optimizer::Optimizer, ::MOI.ConstraintDual, ci::AFFEQ)
+function MOI.get(optimizer::Optimizer, attr::MOI.ConstraintDual, ci::AFFEQ)
+    MOI.check_result_index_bounds(optimizer, attr)
     return -MOI.get(optimizer, DualSolutionVector())[ci.value]
 end
